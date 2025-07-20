@@ -1,0 +1,492 @@
+---
+title: "Hurtos en transporte publico Medellin."
+author: "Andrey Pachon y Sebastian Jacobo"
+date: '2022-09-02'
+output: html_notebook
+---
+
+Para el caso, se elige una base de datos tomada de la red de Datos abiertos, más explícitamente de la Alcaldía de Medellín donde se recopilo información de los hurtos registrados por la Policía Nacional cometidos contra personas en espacio público en la ciudad de Medellín (Antioquia)a través del proyecto Sistema de Información para la Seguridad y Convivencia (SISC) entre el 1 de Enero del 2004 y el 30 de Septiembre del 2021. Para el analisis solo se tomarán los registros comprendidos entre el 1 de Enero 2017 al 30 de Septiembre del 2021
+
+Para en análisis descriptivo de los datos en primer lugar, se realiza la instalación de las librerías correspondientes:
+
+```{r}
+# Funciones para manipulación y exploración de datos
+
+#install.packages("readr")
+#install.packages("dplyr")
+#install.packages("ggplot2")
+#install.packages("FactoMiner")
+#install.packages("ade4")
+#install.packages("FactoClass")
+#install.packages("factoextra")
+#install.packages("missMDA")
+#install.packages("leaflet")
+#install.packages("modeest")
+#install.packages("webshot")
+#install.packages("gplots")
+#install.packages("summarytools")
+#webshot::install_phantomjs() #Comando para screenshot Mapa Interactivo
+
+#Cargue de librerias
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(FactoMineR)
+library(ade4)
+library(FactoClass)
+library(factoextra)
+library(missMDA)
+library("leaflet")
+library(modeest)
+library(gplots)
+library(webshot)
+library(summarytools)
+```
+
+Posteriormente se carga la base de datos extraída de la fuente para luego realizar, si es el caso, la transformación o depuración de algunas variables.
+
+```{r}
+base <- read.csv2("C:/Users/wilma/OneDrive/Escritorio/Especializacion Analitica/R/Parcial I/hurto_a_persona_transporte_publico_Medellin.csv")
+```
+
+Ahora inspeccionaremos de manera general con un resumen estadístico de las columnas o variables que componen la base de datos.
+
+```{r}
+summary(base)
+```
+
+Ahora determinaremos la cantidad de registros y columnas de la base de datos.
+
+```{r}
+dim(base)
+```
+
+De este resultado podemos establecer hay un total de 20.492 registros y 35 variables. De las 35 variables que componen la base de datos 33 son de tipo categórico o cualitativo (cadenas de caracteres). Las variables cantidad, longitud, latitud y edad deben estar catalogada como numéricas ("double" o "integer"). La variable "fecha_hecho" hace referencia a un variable de tiempo(date).
+
+Para el análisis se utilizarán las siguientes variables: latitud, longitud, cantidad, sexo, edad, estado Civil, medio_transporte, modalidad, arma_medio, lugar, bien, sede_receptora, categoria_bien y fecha_hecho. Para esta última, se extraerá el año y el mes en el que ocurrió el hecho de hurto reportado creando así una variable ‘mes’ y una ‘año’.
+
+Las variables grupo_actor, actividad_delictiva, parentesco, ocupacion, discapacidad, grupo_especial, nivel academico, testigo,conducta,caracterizacion,conducta especial, articulo_penal, categoria_penal,nombre_barrio,bien, grupo_bien, modelo,color, permiso y unidad_medida no son tenidos en cuenta ya que están compuestas con un unico dato descrito como "Sin dato" en la fuente del dataset. Las variables codigo_barrio y codigo_comuna hacen referencia a una clave única o código referenciado por su ubicación en la ciudad de Medellín por lo que tampoco serán tenidas en cuenta para el análisis.
+
+De acuerdo a esta información se realiza el renombramiento de algunas de las variables seleccionadas con el fin de facilitar el análisis. 
+
+```{r}
+
+#Filtro de registros para el periodo en mencion
+
+base_delitos <- base%>% filter(fecha_hecho >= 2017)
+
+#Eliminación de el valor -1 en la variable edad
+
+base_delitos <- base_delitos[base_delitos$edad != -1,] 
+
+#Renombramiento y conversión de algunas de las variables seleccionadas
+
+latitud_mapa <- as.double(base_delitos$latitud)
+longitud_mapa <- as.double(base_delitos$longitud)
+medio_transporte_victima <- base_delitos$medio_transporte
+modalidad_hurto <- base_delitos$modalidad
+tipo_arma_hurto <- base_delitos$arma_medio
+lugar_hechos_hurto <- base_delitos$lugar
+articulo_hurto <- base_delitos$bien
+categoria_articulo_hurto <- base_delitos$categoria_bien
+sexo <- base_delitos$sexo
+edad <- as.integer(base_delitos$edad)
+estado_civil <- base_delitos$estado_civil
+nombre_localidad <- base_delitos$sede_receptora
+cantidad_robos <- as.integer(base_delitos$cantidad)
+
+
+# Conversion de "fecha_hurto" a variable de tipo fecha(Date)
+fecha_hecho_hurto <- as.Date(base_delitos$fecha_hecho)
+
+#Crear variable de año y mes para la variable "fecha_hecho_hurto"
+
+año_hecho_hurto <- as.numeric(format(fecha_hecho_hurto, '%Y')) 
+mes_hecho_hurto <- as.numeric(format(fecha_hecho_hurto, '%m'))
+
+```
+
+Se crea una nueva tabla con las variables determinadas para el análisis.
+
+```{r}
+base_delitos1 <- data.frame(latitud_mapa,longitud_mapa,cantidad_robos,año_hecho_hurto,mes_hecho_hurto,sexo,edad,estado_civil,medio_transporte_victima,modalidad_hurto,tipo_arma_hurto,nombre_localidad, lugar_hechos_hurto,articulo_hurto,categoria_articulo_hurto)
+
+dim(base_delitos1)
+```
+
+De esta manera ahora se cuenta con una base de datos de 15.664 registros y 15 variables (Se eliminan de la variable edad algunos valores inconsistentes (-1). Se cuenta ahora con 6 variables cuantitativas ('año_hecho_hurto', 'mes_hecho_hurto','edad', 'Cantidad_robos' y las variables latitud_mapa y longitud_mapa) y 10 variables cualitativas.
+
+Ahora convertimos a factores cada una de las variables representadas en la nueva tabla (base_delitos1). En esta conversión no se tiene en cuenta la variable edad, año_hecho_hurto y mes_hecho_hurto y las variables de georeferenciación (latitud y longitud)
+
+Adicionalmente se apartan del análisis de datos los registros con edad de -1, se agrupan los registros en la columna 'modalidad_hurto' de 'halado', 'forcejeo' y 'raponazo' en un único registro de 'raponazo'.
+
+Para las variables cualitativas se agruparon los registros con una prevalencia menor a 1% en la categoría 'otros' para facilitar el análisis y la visualización de los datos.
+
+```{r}
+basef <- base_delitos1
+
+
+#En la columna de modalidad_hurto juntar halado, forcejeo y raponazo en raponazo y cambiar 'comicion de delito' por sin dato
+basef$modalidad_hurto <- ifelse(basef$modalidad_hurto == 'Halado', 'Raponazo',
+                         ifelse(basef$modalidad_hurto == 'Forcejeo', 'Raponazo',
+                         ifelse(basef$modalidad_hurto == 'Raponazo', 'Raponazo',
+                         ifelse(basef$modalidad_hurto == 'Atraco', 'Atraco',
+                         ifelse(basef$modalidad_hurto == 'Clonacion de tarjeta', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Cosquilleo', 'Cosquilleo',
+                         ifelse(basef$modalidad_hurto == 'Descuido', 'Descuido',
+                         ifelse(basef$modalidad_hurto == 'Engaño', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Escopolamina', 'Escopolamina',
+                         ifelse(basef$modalidad_hurto == 'Fleteo', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Llamada millonaria', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Miedo o terror', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Retencion de tarjeta', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Rompimiento cerraduta', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Rompimiento de ventana', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Simulando necesidad', 'Otros',
+                         ifelse(basef$modalidad_hurto == 'Suplantacion', 'Otros', 'Sin dato')))))))))))))))))
+basef$modalidad_hurto <- as.factor(basef$modalidad_hurto)
+basef$sexo <- as.factor(basef$sexo)
+basef$estado_civil <- as.factor(basef$estado_civil)
+basef$medio_transporte_victima <- as.factor(basef$medio_transporte_victima)
+basef$tipo_arma_hurto <- as.factor(basef$tipo_arma_hurto)
+basef$nombre_localidad <- as.factor(basef$nombre_localidad)
+basef$latitud_mapa <- as.double(basef$latitud_mapa)
+basef$longitud_mapa <- as.double(basef$longitud_mapa)
+basef$articulo_hurto <- as.factor(basef$articulo_hurto)
+
+basef$categoria_articulo_hurto <- ifelse(basef$categoria_articulo_hurto == 'Alimento', 'Alimento',
+                         ifelse(basef$categoria_articulo_hurto == 'Dinero, joyas, piedras preciosas y titulo valor', 'Dinero, joyas y titulo valor',
+                         ifelse(basef$categoria_articulo_hurto == 'Documentos', 'Documentos',
+                         ifelse(basef$categoria_articulo_hurto == 'Prendas de vestir y accesorios', 'Prendas y accesorios',
+                         ifelse(basef$categoria_articulo_hurto == 'Tecnologia', 'Tecnologia',
+                         ifelse(basef$categoria_articulo_hurto == 'Sin dato', 'Sin dato', 'Otros'))))))
+basef$categoria_articulo_hurto <- as.factor(basef$categoria_articulo_hurto)
+```
+
+Para la columna "lugar_hechos_huerto" se realizara una agrupacion de los datos; ya que algunos de estos no tiene una cantidad significativa mayor a 100 registros o tuplas. Estos se denotaran como **"Otros lugares"**
+
+```{r}
+lugar_menor_conteo <- c('Parque','Restaurante','Turístico','Biblioteca','Cementerio','Fábrica o empresa','Montallanta','Corporación','Institución de educación superior','Estación de gasolina','Oficina','Parqueadero','Sin dato','Escenario deportivo','Iglesia','Quebrada o rio','Hospital o centro de salud','Instalación gubernamental','Supermercado','Plaza de mercado','Puente peatonal','Institución educativa (jardín, primaria o secundaria)','Cafetería','Sede social, club, auditorio o similar','Local comercial','Cajero electrónico','Conjunto residencial','Banco','Finca','Potrero','Lote baldío','Bodega','Aeropuerto','Billar','Caseta vigilancia conjunto residencial','Casino','Reserva natural','Panadería','Droguería o farmacia','Metro','Puesto de trabajo','Caseta de vigilancia empresa','Gimnasio','Teatro','Zona boscosa','Feria de ganado','Peaje','Obra en construcción','Cárcel','Casa de apuesta','Albergue','Baño','Plaza de toros','Casa o apartamento', 'Instalación fuerza pública', "Hotel, motel y hostal")
+
+basef$lugar_hechos_hurto <- ifelse(basef$lugar_hechos_hurto %in% lugar_menor_conteo, "Otros lugares",lugar_hechos_hurto)
+basef$lugar_hechos_hurto <- as.factor(basef$lugar_hechos_hurto)
+
+tablalugarhechos <- table(basef$lugar_hechos_hurto)
+tablalugarhechos
+```
+
+### Analisis de variables cualitativas
+
+Con el fin de analizar las variables cualitativas, realizamos unas tablas de frecuencia y gráficos que permitan la visualización de los datos en este tipo de variables.
+
+
+```{r}
+#Variable sexo
+tablasexo <- freq(basef$sexo) #Frecuencias de variable sexo
+tablasexo
+
+ggplot(basef, aes(x = factor(""), fill = sexo) ) +
+  geom_bar() +
+  coord_polar(theta = "y") +
+  scale_x_discrete("")
+
+```
+
+En cuanto a la variable de Sexo (Genero) encontramos que no hay una diferencia significativa entre el número de hombres y mujeres que son víctimas de hurto en donde el 46.36% de las víctimas son hombres y el 53.64% son mujeres.
+
+```{r}
+#variable estado civil
+tablaestado_civil <- freq(basef$estado_civil) #Frecuencias de variable estado civil
+tablaestado_civil
+
+ggplot(basef, aes(estado_civil, ..count..)) + geom_bar() +
+  labs(title = "Estado civil de victimas de hurto",
+       x = "Estado civil", y='Frecuencia Absoluta')
+```
+
+Para el estado civil de las victimas encontramos que el 60.23% de ellos se encontraban soltero(a), seguido los(a) casado(a) con un 19.13% y en unión marital de hecho 15.42%. Las demás categorias suman el 5.22% restante.
+
+```{r}
+#variable medio de transporte publico utilziado - Victima del hurto
+tablamedio_transporte_hurto <- freq(basef$medio_transporte_victima)
+tablamedio_transporte_hurto
+
+tablasexo_transporte <- 100*prop.table(table(basef$medio_transporte_victima, basef$sexo),2)
+tablasexo_transporte
+
+ggplot(basef, aes(medio_transporte_victima, fill = medio_transporte_victima), na.rm=TRUE) + #plot relacionando con genero
+  geom_bar() + facet_grid(sexo ~ .)
+```
+
+En cuanto al medio de transporte utilizado por los encuestados, encontramos que el menos utilizado es el metro con un 27.20%. El Autobus y el Taxi con un con un 43.43% y 29.37% respectivamente son los medios de transporte mas utilizados.
+
+Al ponderar el medio de transporte utilizado con el género de las victimas, encontramos que 56.42% de las mujeres aprox. utilizan Autobus y el 36.39% aprox. de los hombres utiliza Taxi.
+
+```{r}
+#variable modalidad de hurto
+tablamodalidad_hurto <- freq(basef$modalidad_hurto)
+tablamodalidad_hurto
+
+tablasexo_modalidad <- 100*prop.table(table(basef$modalidad_hurto, basef$sexo),2)
+tablasexo_modalidad
+
+ggplot(basef, aes(modalidad_hurto, fill = modalidad_hurto), na.rm=TRUE) + #plot relacionando con genero
+  geom_bar() + facet_grid(sexo ~ .)
+
+ggplot(basef, aes(modalidad_hurto, fill = modalidad_hurto), na.rm=TRUE) + #plot relacionando con genero
+  geom_bar() + facet_grid(medio_transporte_victima ~ .)
+```
+
+En cuanto a la variable "modalidad de hurto" encontramos el Cosquilleo con el 54.58% y seguidamente el Atraco con un 31.10%, son las mas modalidades mas utilizadas para robar .Segmentado por sexos, se puede ver que los hombres son robados por la modalidad de Cosquilleo en mayor medida (49.07% aprox. de los hombres) mientras para las mujeres la modalidad mas atribuida es el cosquilleo (59.33% aprox. de las mujeres).
+
+```{r}
+#variable tipo de arma usada para el hurto
+tablaarma <- freq(basef$tipo_arma_hurto)
+tablaarma
+
+tablamediotransporte_arma <- 100*prop.table(table(basef$tipo_arma_hurto, basef$medio_transporte_victima),)
+tablamediotransporte_arma
+
+ggplot(basef, aes(tipo_arma_hurto, fill = tipo_arma_hurto), na.rm=TRUE, ) + #plot relacionando con genero
+  geom_bar() + facet_grid(medio_transporte_victima ~ .) + theme(axis.text.x = element_text(angle=90)) 
+```
+
+El analisis de la variable tipo de arma nos muestra que en su mayoria los robos ocurren sin el uso de armas (el 69.41% aprox.de los casos), adicionalmente, dentro de las armas mas utilizadas se encuentra el arma de fuego con un 14.31% aprox. y las armas cortopunzantes con un 13.06% aprox.
+
+La no utilizacion de armas se puede explicar por la predominancia del cosquilleo como el tipo de robo que ocurre con mayor frecuencia dentro del transporte publico; ya que esta modalidad no exige el uso de armas para su ejecución.
+
+```{r}
+#Variable lugar_hecho
+
+tablalugarhecho <- freq(basef$lugar_hechos_hurto) #Tabla de frecuencias
+tablalugarhecho
+
+ggplot(basef, aes(reorder(lugar_hechos_hurto,))) + geom_bar() + coord_flip()+labs(title = "Hurtos por lugar del hecho",
+       x = "Lugar del hecho",
+       y = "Cantidad")
+
+```
+
+De los tres lugares en donde se registran el 70.82% de total de los hurtos, se encuentran las Estaciones del sistemas masivo de transporte - Metro con 4.094 casos equivalente a 26.14% del total de las victimas, seguido por el Bus de servicio publico con 3.611 personas equivalente a 23.05% y la Via Publica con 3.388 casos equivalente a 21.63%. Mientras tanto, en las Estaciones del Metro plus y en el interior del Metro plus, que se caracteriza por ser un sistema de autobus de transito rapido, se registraron 1.502 hurtos equivalente a 9.59%. En los Paraderos del bus, se registran 870 casos equivalente a 5.55% del total de hurtos registrados.
+
+En los lugares denotados como "Vehiculo Particular" y otros lugares (Transformación inicial dada para el tratamiento de difererentes lugares de la ciudad de Medellín, con hurtos registrados con una cantidad menor a 100) se registraron 262 y 1.086 casos respectivamente, equivalente ponderado de 8.6%
+
+De los lugares en donde es menos frecuente la presencia de este tipo de hechos se encuentran los edificios con 114 casos, el Terminal de Transporte con 122 casos, Residencia o vivienda con 125 casos, Bares o cantinas con 135 casos, Centros Comerciales con 160 casos y los Almacenes, tiendas y otro tipo de establecimiento comercial con 195 casos. Estos casos representan 5.43% del total de casos para el estudio.
+
+Ahora a través de una tabla de contigencia se quiere realizar una comparación entre el lugar en donde se registra el hecho y la variable sexo o genero:
+
+```{r}
+#Tabla y grafica de contigencia variables Lugar de los hechos y sexo
+
+tablasexo_lugarhurto <- table(basef$lugar_hechos_hurto,basef$sexo)
+
+tablasexolugarhurto <- 100*prop.table(table(basef$lugar_hechos_hurto, basef$sexo),2)
+tablasexolugarhurto
+
+tablas_lugar <- as.table(as.matrix(tablasexo_lugarhurto)) #Conversion de tabla a matriz
+
+balloonplot(t(tablas_lugar), main ="Tabla de contingencia", xlab ="Genero", ylab="Lugar hecho",label.col = "dark blue",
+            label = TRUE, show.margins = FALSE,
+          )
+
+```
+
+Como resumen de la tabla, se observa que 2.410 casos equivalente a 33.18% aprox. de los hombres fueron robados en alguna de las Estaciones que compone el sistema Metro, mientras que para las mujeres, el sitio en donde se reconoce mayor cantidad de hechos de hurto es en el Bus de Servicio Publico con un total de 2.210 registros equivalente a 26.30% aprox.
+
+
+```{r}
+
+#Variable nombre_localidad (Comunas)
+
+localidades_medellin <- basef %>% 
+  group_by(nombre_localidad) %>% 
+  summarize(cantidad_robos = n())
+  
+           
+ggplot(data = localidades_medellin, aes(x = reorder(nombre_localidad,+cantidad_robos), y = cantidad_robos)) +
+  geom_bar(stat = "identity",  fill = "light blue", color = "black") +
+  geom_text(aes(y = cantidad_robos, label = cantidad_robos),
+                position = position_dodge(width = 1), size = 4, vjust = 0.5, hjust = -0.1, col = "black") +
+  xlab("Localidad o comuna") + 
+  ylab("Total de Robos") +
+  ggtitle("Total de Robos por Localidad") +
+  ylim(c(0,7500)) +
+  theme_minimal() +
+  coord_flip()
+
+tablalocalidades <- freq(basef$nombre_localidad)
+tablalocalidades
+
+
+```
+
+A través de esta grafica de barras, podemos visualizar la cantidad total de robos registrados en el periodo del 1 de Enero del 2017- 30 de Septiembre del 2021. Las cinco comunas mas afectadas son Candelaria con 6.193 hurtos equivalentes al 39.53% aprox., seguido por Poblado con 2.196 hurtos que equivalen al 14.01% aprox., Castilla con 1.894 hurtos correspondientes igual al 12.09% aprox., Laureles con 1.741 robos efectuados equivalentes al 11.11% y Belén con 1.572 que corresponden al 10.03%. Vale mencionar que Candelaria, Poblado, castilla y Laureles estan catalogadas popularmente como zonas o lugares donde mas se cometen hurtos.
+
+Las comunas o localidades de Aranjuez, Buenos Aires, Doce de Octubre, San Javier, Villa Hermosa, Manrique, Popular, San Antonio de Prado, Santa Cruza, Itagui, Sabaneta, Envigado y Bello representan el 13.23% aprox.del total de registro de hurtos registrados en el periodo citado.
+
+#Analisis de correspondencias multiples
+
+```{r}
+tablamca <- subset(basef, año_hecho_hurto == 2021, select = c(sexo,nombre_localidad,lugar_hechos_hurto,tipo_arma_hurto))
+
+acm <- MCA(tablamca,ncp = 4,graph = TRUE)
+view(acm)
+```
+
+### Analisis de variables cuantitativas
+
+En este apartado tendremos un análisis de las variables edad y año_fecha_hurto
+
+```{r}
+#Variable Edad
+
+min <- min(basef$edad)
+max <- max(basef$edad)
+n <- length(basef$edad)
+k <- (max-min)/5
+breaks = seq(min, max, by=k)
+intervalos <- cut(basef$edad, breaks, right=FALSE)
+tablaedad <- table(intervalos)
+cbind(tablaedad) 
+
+hist(basef$edad, breaks = 'sturges', include.lowest=TRUE, right=TRUE,plot=T, ylim = c(0,4000),col="light green", main = "Histograma de frecuencias/Edad",
+     ylab= "Frecuencia absolutas ",
+     xlab= "Edad")
+
+#Frecuencia procentuales
+frecuencias_porcentuales <- tablaedad / n *100
+cbind(frecuencia = tablaedad, frecuencias_porcentuales, f.a.acum = cumsum(tablaedad), 
+      f.r.a = cumsum(frecuencias_porcentuales))
+
+```
+
+Se identifica que el grupo de personas, víctima de hurto se distribuye de la siguiente manera:
+
+-   Entre los 8-24 años de edad 3.356 personas, que equivale el 21.42% aprox.
+-   Entre los 24-41 años de edad 7.987 personas, que equivale al 50.98% aprox.
+-   Entre los 41-57 años de edad 3.286 personas, que equivale al 20.97% aprox.
+-   Entre los 57-74 años de edad 975 personas, que equivale al 6.22% aprox.
+-   Entre los 74-91 años de edad 58 personas, que equivale al 0.37% aprox.
+
+El histograma nos muestra que los grupos poblacionales más afectador por hurto son las personas entre los 24 y 57 años de edad que componen cerca del 72% de los datos. La inclinación hacia la izquierda indica que las personas con más edad que son víctimas de hurto representan casos ínfimos o aislados.
+
+
+Ahora determinaremos algunas medidas de tendencia central para la variable "edad"
+
+```{r}
+#Media
+Mediarecortada_edad <- mean(basef$edad, na.rm = TRUE,trim=0.1)
+Mediarecortada_edad
+```
+
+La edad promedio de la muestra es aproximadamente 34 años.
+
+```{r}
+#Mediana
+Mediana_edad <- median(basef$edad, na.rm =TRUE)
+Mediana_edad 
+```
+
+Este valor indica que el 50% de la población tiene más de 32 años, y el otro 50% tiene 32 años de dad o menos.
+
+```{r}
+#Moda
+Moda_base <- mfv(basef$edad) 
+Moda_base
+```
+
+La edad mas frecuente es de 27 años
+
+```{r}
+#Varianza
+Varianza_Edad <- var(basef$edad, na.rm = TRUE)
+Varianza_Edad
+```
+
+```{r}
+#Desviacion Estandar
+desvestand_Edad <- sd(basef$edad, na.rm = TRUE)
+desvestand_Edad
+```
+
+En promedio la edad de este grupo de personas se aparta de la media en aproximadamente 12.70 años.
+
+Ahora se realiza un diagrama de Cajas y Bigotes, para realizar una comparación entre la variable edad y la modalidad de robo
+
+```{r}
+ggplot(basef, aes(modalidad_hurto,edad)) +
+  geom_boxplot(notch = TRUE, main = "Grafico comparativo Edad- Modalidad de hurto", ylab= "Modalidad de hurto") + stat_summary(fun.y=mean, geom="point", shape="\U1F418", size=4, color="red") + scale_y_continuous(name = "Edad") + 
+       scale_x_discrete(name = "Modalidad de hurto") +      
+       ggtitle("Boxplot comparativo Edad- Modalidad de hurto")
+```
+
+En este grafico "Box-plot" o caja y Bigotes podemos afirmar las siguientes expresiones:
+
+-   En las modalidades de "Atraco", "Cosquilleo", "Descuido", "Escopolamina", "Raponazo" y "Otros" el 75 % de las personas robadas tiene menos de 50 años
+
+-   En las modalidad de "Cosquilleo" se pueden apreciar mayor cantidad de valores atípicos o valores que afectan el análisis. El 75% de las personas robadas a través de esta modalidad tienen menos de 40 años aprox. Esta modalidad presenta individuos con el rango de edad mas bajo,junto con el "Raponazo"
+
+-   En la modalidad de "Escopolamina" tiene datos se encuentran mas agrupados, lo que indica un rango de rango intercuartilico de edades mas pequeño.
+
+-   En la modalidad de "Otros" representa un mayor rango edades sin valores atípicos. En esta modalidad, se registran las personas con una edad cerca aprox. a los 50 años.
+
+-   Para los Cuartiles Q1, el grupo de edad se encuentran mas concentrado respecto a la modalidad de hurto, que el cuartil Q4 en cada una de las categorias.
+
+-   Existe una asimetria positiva de la edad en cada una de las cajas, respecto a cada una de las modalidades de hurto
+
+-   Existen en general para cualquier modalidad valores atipicos o extremnos de edades mayores.
+
+```{r}
+#Variable año_hecho_hurto 
+
+#Tabla para suma de registros por año
+tabla_robos_año <- data.frame(año_hecho_hurto,mes_hecho_hurto,cantidad_robos) 
+
+tabla_robos_por_año  <-tabla_robos_año%>%                                         
+ group_by(año_hecho_hurto) %>%                        
+ summarise(Cantidad = sum(cantidad_robos))
+
+# Grafico de linea 
+
+ggplot(data = tabla_robos_por_año,
+       mapping = aes(x=año_hecho_hurto, y = Cantidad)) +
+  geom_line() + geom_point(shape=24)
+  labs(x = "Año",
+       y = "Cantidad de robos")
+  
+#Tabla de frecuencia
+tabla_robos_por_añof <- freq(basef$año_hecho_hurto)
+tabla_robos_por_añof
+
+```
+
+De acuerdo al total de robos registrados entre el 1 de Enero del año 2017 y el 30 de Septiembre del 2021, los tres periodos en donde se registraron mayor cantidad de hurtos fueron:
+
+-   Para el año 2020, 2.579 hurtos equivalentes al 16.46%
+-   Para el año 2019, 5.018 hurtos equivalentes al 32.04%
+-   Para el año 2018, 3.592 hurtos equivalentes al 22.93%
+
+En el año 2017 y 2021 la cantidad de hurtos registrados fue levemente menor, respecto a los periodos anteriormente mencionados.
+
+La disminución del número de hurtos desde el año 2020 coincide con la implementación del confinamiento a raíz de la pandemia generada por el Covid-19.
+
+### Mapa interactivo- Hurtos cometidos- Año 2021
+
+Se filtran los valores de los hurtos cometidos en el año 2021 en un dataframe para graficar un mapa interactivo, con la utilización de la librería "leatlef", agrupando por zonas los hurtos cometidos en la ciudad de Medellín
+
+```{r}
+tabla_robos <- as.data.frame(data.frame(latitud_mapa,longitud_mapa,año_hecho_hurto,edad,modalidad_hurto,tipo_arma_hurto))
+tabla_robos_2021 <- data.frame(tabla_robos %>% filter(año_hecho_hurto == 2021))
+
+```
+
+## Visualización de mapa interactivo
+
+```{r}
+mapa_robos_medellin <- leaflet() %>%
+  addProviderTiles(providers$Esri.WorldStreetMap)
+mapa_robos_medellin %>% 
+  addMarkers(lat=~latitud_mapa, lng =~longitud_mapa, data = tabla_robos_2021, clusterOptions = markerClusterOptions())%>%
+	  addProviderTiles(providers$Esri.WorldStreetMap) 
+```
